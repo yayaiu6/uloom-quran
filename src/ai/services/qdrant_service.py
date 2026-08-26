@@ -182,9 +182,15 @@ class QdrantService:
                 search_body["score_threshold"] = score_threshold
 
             with httpx.Client(timeout=30.0) as http_client:
+                headers = {"Content-Type": "application/json"}
+                api_key = qdrant_config.api_key
+                if api_key:
+                    headers["api-key"] = api_key
+
                 resp = http_client.post(
                     f"{self.base_url}/collections/{collection_name}/points/search",
-                    json=search_body
+                    json=search_body,
+                    headers=headers
                 )
                 if resp.status_code != 200:
                     logger.error(f"Qdrant search error: {resp.status_code} - {resp.text}")
