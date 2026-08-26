@@ -17,8 +17,9 @@ COPY templates/ ./templates/
 COPY static/ ./static/
 COPY run.py .
 
-# Copy SQLite database (embedded for read-heavy workload)
-COPY db/uloom_quran.db ./db/uloom_quran.db
+# Copy schema and create SQLite database at build time
+COPY db/ ./db/
+RUN mkdir -p ./db && python -c "import sqlite3; conn = sqlite3.connect('db/uloom_quran.db'); conn.executescript(open('db/schema.sql', encoding='utf-8').read()); conn.close()"
 
 # Copy data files (mutashabihat, exports)
 COPY data/mutashabihat/ ./data/mutashabihat/
