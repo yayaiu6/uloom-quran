@@ -42,8 +42,7 @@ async def qiraat_main_page(request: Request):
         """)
         qurra = [dict_from_row(row) for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("qiraat.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat.html", {
         "surahs": surahs,
         "qurra": qurra
     })
@@ -89,8 +88,7 @@ async def qiraat_learn_page(request: Request):
         """)
         riwayat = [dict_from_row(row) for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("qiraat_learn.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_learn.html", {
         "qurra": qurra,
         "riwayat": riwayat
     })
@@ -192,8 +190,7 @@ async def qiraat_glossary_page(request: Request):
             categories[cat] = []
         categories[cat].append(term)
 
-    return templates.TemplateResponse("qiraat_glossary.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_glossary.html", {
         "glossary_terms": glossary_terms,
         "categories": categories
     })
@@ -300,8 +297,7 @@ async def qiraat_stats_page(request: Request):
         except:
             stats['riwayat_coverage'] = []
 
-    return templates.TemplateResponse("qiraat_stats.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_stats.html", {
         "stats": stats
     })
 
@@ -319,7 +315,7 @@ async def qiraat_verse_page(request: Request, verse_key: str):
         surah_id = int(parts[0])
         ayah_number = int(parts[1])
     except (ValueError, IndexError):
-        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
     with get_db() as conn:
         cursor = conn.cursor()
@@ -335,13 +331,12 @@ async def qiraat_verse_page(request: Request, verse_key: str):
         verse = cursor.fetchone()
 
         if not verse:
-            return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+            return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
         verse_data = dict_from_row(verse)
         total_ayahs = verse_data['ayah_count']
 
-    return templates.TemplateResponse("qiraat_verse.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_verse.html", {
         "verse": verse_data,
         "surah_id": surah_id,
         "ayah_number": ayah_number,
@@ -370,12 +365,11 @@ async def qiraat_surah_page(request: Request, surah_id: int):
         surah = cursor.fetchone()
 
         if not surah:
-            return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+            return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
         surah_data = dict_from_row(surah)
 
-    return templates.TemplateResponse("qiraat_surah.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_surah.html", {
         "surah": surah_data
     })
 
@@ -398,7 +392,7 @@ async def qiraat_audio_compare_page(request: Request, verse_key: str):
         surah_id = int(parts[0])
         ayah_number = int(parts[1])
     except (ValueError, IndexError):
-        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
     with get_db() as conn:
         cursor = conn.cursor()
@@ -414,7 +408,7 @@ async def qiraat_audio_compare_page(request: Request, verse_key: str):
         verse = cursor.fetchone()
 
         if not verse:
-            return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+            return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
         verse_data = dict_from_row(verse)
         total_ayahs = verse_data['ayah_count']
@@ -423,8 +417,7 @@ async def qiraat_audio_compare_page(request: Request, verse_key: str):
         cursor.execute("SELECT id, name_arabic FROM surahs ORDER BY id")
         surahs = [dict_from_row(row) for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("qiraat_audio_compare.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_audio_compare.html", {
         "verse": verse_data,
         "surah_id": surah_id,
         "ayah_number": ayah_number,

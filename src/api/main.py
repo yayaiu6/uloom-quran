@@ -29,7 +29,7 @@ app = FastAPI(
     - **أسباب النزول** - Reasons for revelation
     - **إعراب القرآن** - Arabic grammatical analysis
     - **المتشابهات** - Similar verses with Quranpedia integration
-    - **الذكاء الاصطناعي** - AI-powered semantic search and Q&A with GPT-4o
+    - **الذكاء الاصطناعي** - AI-powered semantic search and Q&A with Gemini
     """,
     version="1.0.0",
     docs_url="/api/docs",
@@ -100,8 +100,7 @@ async def home(request: Request):
         except:
             earab_count = 0
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "stats": {
             "verses": verse_count,
             "tafsirs": tafsir_count,
@@ -124,8 +123,7 @@ async def quran_page(request: Request):
         surahs = [dict(zip(['id', 'name_arabic', 'name_english', 'ayah_count', 'revelation_type'], row))
                   for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("quran.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "quran.html", {
         "surahs": surahs
     })
 
@@ -144,7 +142,7 @@ async def surah_page(request: Request, surah_id: int):
         surah = cursor.fetchone()
 
         if not surah:
-            return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+            return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
         surah_data = dict(zip(['id', 'name_arabic', 'name_english', 'ayah_count', 'revelation_type'], surah))
 
@@ -166,8 +164,7 @@ async def surah_page(request: Request, surah_id: int):
         tafsir_books = [dict(zip(['id', 'name_arabic', 'short_name', 'author_arabic'], row))
                        for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("surah.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "surah.html", {
         "surah": surah_data,
         "verses": verses,
         "tafsir_books": tafsir_books
@@ -194,8 +191,7 @@ async def tafsir_page(request: Request):
         tafsir_books = [dict(zip(['id', 'name_arabic', 'short_name', 'author_arabic', 'methodology'], row))
                        for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("tafsir.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "tafsir.html", {
         "surahs": surahs,
         "tafsir_books": tafsir_books
     })
@@ -219,8 +215,7 @@ async def qiraat_page(request: Request):
         qurra = [dict(zip(['id', 'name_arabic', 'city', 'death_year_hijri'], row))
                  for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("qiraat.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat.html", {
         "surahs": surahs,
         "qurra": qurra
     })
@@ -229,9 +224,7 @@ async def qiraat_page(request: Request):
 @app.get("/qiraat/stats", response_class=HTMLResponse)
 async def qiraat_stats_page(request: Request):
     """Qiraat statistics dashboard page"""
-    return templates.TemplateResponse("qiraat_stats.html", {
-        "request": request
-    })
+    return templates.TemplateResponse(request, "qiraat_stats.html", {})
 
 
 @app.get("/qiraat/verse/{verse_key:path}", response_class=HTMLResponse)
@@ -243,7 +236,7 @@ async def qiraat_verse_page(request: Request, verse_key: str):
         surah_id = int(parts[0])
         ayah_number = int(parts[1])
     except (ValueError, IndexError):
-        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+                    return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
     with get_db() as conn:
         cursor = conn.cursor()
@@ -259,7 +252,7 @@ async def qiraat_verse_page(request: Request, verse_key: str):
         verse = cursor.fetchone()
 
         if not verse:
-            return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+            return templates.TemplateResponse(request, "404.html", {}, status_code=404)
 
         verse_data = dict(zip(
             ['id', 'verse_key', 'text_uthmani', 'surah_name', 'surah_name_english', 'ayah_count'],
@@ -268,8 +261,7 @@ async def qiraat_verse_page(request: Request, verse_key: str):
 
         total_ayahs = verse_data['ayah_count']
 
-    return templates.TemplateResponse("qiraat_verse.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "qiraat_verse.html", {
         "verse": verse_data,
         "surah_id": surah_id,
         "ayah_number": ayah_number,
@@ -295,8 +287,7 @@ async def asbab_page(request: Request):
         surahs = [dict(zip(['id', 'name_arabic', 'asbab_count'], row))
                   for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("asbab.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "asbab.html", {
         "surahs": surahs
     })
 
@@ -319,8 +310,7 @@ async def earab_page(request: Request):
         surahs = [dict(zip(['id', 'name_arabic', 'ayah_count', 'earab_count'], row))
                   for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("earab.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "earab.html", {
         "surahs": surahs
     })
 
@@ -335,8 +325,7 @@ async def ai_page(request: Request):
         cursor.execute("SELECT id, name_arabic FROM surahs ORDER BY id")
         surahs = [dict(zip(['id', 'name_arabic'], row)) for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("ai.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "ai.html", {
         "surahs": surahs
     })
 
@@ -351,8 +340,7 @@ async def mutashabihat_page(request: Request):
         cursor.execute("SELECT id, name_arabic, ayah_count FROM surahs ORDER BY id")
         surahs = [dict(zip(['id', 'name_arabic', 'ayah_count'], row)) for row in cursor.fetchall()]
 
-    return templates.TemplateResponse("mutashabihat.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "mutashabihat.html", {
         "surahs": surahs
     })
 
