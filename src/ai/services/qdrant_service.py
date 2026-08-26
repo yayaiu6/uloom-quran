@@ -36,22 +36,20 @@ class QdrantService:
         if qdrant_url:
             # Use URL-based connection (for GKE/cloud)
             logger.info(f"Connecting to Qdrant via URL: {qdrant_url}")
+            self.base_url = qdrant_url.rstrip('/')
             self.client = QdrantClient(
                 url=qdrant_url,
                 api_key=qdrant_api_key if qdrant_api_key else None,
                 timeout=30,
-                prefer_grpc=False  # Use REST API for Cloud Run compatibility
+                prefer_grpc=False
             )
-            self.host = qdrant_url
-            self.port = None
         else:
             # Use host/port connection (for local development)
-            self.host = host or qdrant_config.host
-            self.port = port or qdrant_config.port
-            logger.info(f"Connecting to Qdrant via host: {self.host}:{self.port}")
+            self.base_url = f"http://{host or qdrant_config.host}:{port or qdrant_config.port}"
+            logger.info(f"Connecting to Qdrant via host: {self.base_url}")
             self.client = QdrantClient(
-                host=self.host,
-                port=self.port,
+                host=host or qdrant_config.host,
+                port=port or qdrant_config.port,
                 check_compatibility=False
             )
 
@@ -174,7 +172,6 @@ class QdrantService:
         try:
             # Use HTTP API directly for Cloud Run compatibility
             import httpx
-            qdrant_url = self.host if self.host.startswith('http') else f"http://{self.host}:{self.port}"
 
             search_body = {
                 "vector": query_vector,
@@ -186,7 +183,7 @@ class QdrantService:
 
             with httpx.Client(timeout=30.0) as http_client:
                 resp = http_client.post(
-                    f"{qdrant_url}/collections/{collection_name}/points/search",
+                    f"{self.base_url}/collections/{collection_name}/points/search",
                     json=search_body
                 )
                 if resp.status_code != 200:
