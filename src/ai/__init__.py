@@ -1,7 +1,7 @@
 """
 AI Module for علوم القرآن Platform
 Provides semantic search, RAG Q&A, and intelligent analysis features
-using Qdrant vector database and Azure OpenAI GPT-4o
+using Qdrant vector database and Gemini
 """
 
 from .services.embedding_service import EmbeddingService

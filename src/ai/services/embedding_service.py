@@ -1,32 +1,27 @@
 """
-Embedding Service using Azure OpenAI
+Embedding Service using Gemini
 Generates vector embeddings for Arabic/Quranic text
 """
 
 import asyncio
 from typing import List, Optional, Union
 import logging
-from openai import AzureOpenAI
-from ..config import azure_config
+from google import genai
+from ..config import gemini_config
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
     """
-    Service for generating text embeddings using Azure OpenAI.
+    Service for generating text embeddings using Gemini.
     Supports both single texts and batch processing.
     """
 
     def __init__(self):
-        self.client = AzureOpenAI(
-            azure_endpoint=azure_config.endpoint,
-            api_key=azure_config.api_key,
-            api_version=azure_config.api_version,
-            timeout=30.0  # 30 second timeout
-        )
-        self.deployment = azure_config.embedding_deployment
-        self.dimensions = azure_config.embedding_dimensions
+        self.client = genai.Client(api_key=gemini_config.api_key)
+        self.model = gemini_config.embedding_model
+        self.dimensions = gemini_config.embedding_dimensions
 
     def get_embedding(self, text: str) -> List[float]:
         """
@@ -41,15 +36,14 @@ class EmbeddingService:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
 
-        # Clean and prepare text
         text = self._prepare_text(text)
 
         try:
-            response = self.client.embeddings.create(
-                input=text,
-                model=self.deployment
+            result = self.client.models.embed_content(
+                model=self.model,
+                contents=text
             )
-            return response.data[0].embedding
+            return result.embeddings[0].values
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             raise
@@ -71,7 +65,6 @@ class EmbeddingService:
         """
         all_embeddings = []
 
-        # Process in batches
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             batch = [self._prepare_text(t) for t in batch if t and t.strip()]
@@ -80,18 +73,21 @@ class EmbeddingService:
                 continue
 
             try:
-                response = self.client.embeddings.create(
-                    input=batch,
-                    model=self.deployment
-                )
-                batch_embeddings = [item.embedding for item in response.data]
-                all_embeddings.extend(batch_embeddings)
+                # Gemini embedContent processes one content at a time,
+                # so we process each text individually within the batch
+                batch_embeddings = []
+                for text in batch:
+                    result = self.client.models.embed_content(
+                        model=self.model,
+                        contents=text
+                    )
+                    batch_embeddings.append(result.embeddings[0].values)
 
+                all_embeddings.extend(batch_embeddings)
                 logger.info(f"Processed batch {i//batch_size + 1}, total: {len(all_embeddings)}")
 
             except Exception as e:
                 logger.error(f"Error in batch {i//batch_size + 1}: {e}")
-                # Add None placeholders for failed batch
                 all_embeddings.extend([None] * len(batch))
 
         return all_embeddings
@@ -100,14 +96,12 @@ class EmbeddingService:
         """
         Prepare text for embedding.
         - Remove excessive whitespace
-        - Normalize Arabic text
         - Truncate if too long
         """
-        # Remove excessive whitespace
         text = ' '.join(text.split())
 
-        # Truncate if too long (Azure OpenAI has token limits)
-        max_chars = 8000  # Approximate limit
+        # Gemini embedding model supports up to 2048 tokens (~8000 chars)
+        max_chars = 8000
         if len(text) > max_chars:
             text = text[:max_chars]
 

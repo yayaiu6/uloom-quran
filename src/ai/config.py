@@ -1,6 +1,6 @@
 """
 AI Configuration for علوم القرآن Platform
-Azure OpenAI and Qdrant settings
+Gemini and Qdrant settings
 """
 
 import os
@@ -9,20 +9,18 @@ from typing import Optional
 
 
 @dataclass
-class AzureOpenAIConfig:
-    """Azure OpenAI Configuration - Uses environment variables for production"""
-    endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-    api_key: str = os.getenv("AZURE_OPENAI_KEY", "")
-    api_version: str = os.getenv("AZURE_OPENAI_VERSION", "2024-08-01-preview")
+class GeminiConfig:
+    """Gemini Configuration"""
+    api_key: str = os.getenv("GEMINI_API_KEY", "")
 
-    # Model deployments
-    chat_deployment: str = os.getenv("AZURE_CHAT_DEPLOYMENT", "gpt-4o")
-    embedding_deployment: str = os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
+    # Models
+    chat_model: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+    embedding_model: str = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
 
     # Settings
     chat_temperature: float = 0.7
     chat_max_tokens: int = 4096
-    embedding_dimensions: int = 1536  # text-embedding-ada-002 dimensions
+    embedding_dimensions: int = 3072  # gemini-embedding-001 default dimensions
 
 
 @dataclass
@@ -64,7 +62,7 @@ class RAGConfig:
 
 
 # Global config instances
-azure_config = AzureOpenAIConfig()
+gemini_config = GeminiConfig()
 qdrant_config = QdrantConfig()
 rag_config = RAGConfig()
 
@@ -107,7 +105,7 @@ SYSTEM_PROMPTS = {
 الآية: {verse}
 السورة: {surah} - الآية رقم: {ayah}
 
-الشرح:""",
+ الشرح:""",
 
     "qiraat_analysis": """أنت متخصص في علم القراءات القرآنية.
 

@@ -27,5 +27,5 @@ python-dotenv>=1.0.0
 tqdm>=4.65.0
 
 # AI & Vector Search
-openai>=1.0.0
+google-genai>=1.0.0
 qdrant-client>=1.7.0

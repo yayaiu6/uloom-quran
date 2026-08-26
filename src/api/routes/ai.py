@@ -66,20 +66,16 @@ def _detect_mutashabihat_question(question: str) -> tuple:
 
     is_mutashabihat = any(keyword in question.lower() for keyword in mutashabihat_keywords)
 
-    # Try to extract verse reference
     verse_key = None
 
-    # Pattern 1: verse_key format like "2:14" or "2:255"
     verse_pattern = r'(\d{1,3}):(\d{1,3})'
     match = re.search(verse_pattern, question)
     if match:
         verse_key = f"{match.group(1)}:{match.group(2)}"
         return is_mutashabihat, verse_key
 
-    # Pattern 2: Arabic surah name with ayah number
     for surah_name, surah_num in SURAH_NAMES.items():
         if surah_name in question:
-            # Look for ayah number
             ayah_patterns = [
                 rf'(?:الآية|آية|الايه|ايه|اية|الاية)\s*(\d+)',
                 rf'(\d+)\s*(?:من\s*)?(?:سورة\s*)?{surah_name}',
@@ -139,7 +135,6 @@ def _get_mutashabihat_data(verse_key: str) -> tuple:
                             notes = item.get("notes", "")
                             ayahs_list = item["ayahs"]
 
-                            # Check if source verse is in this group
                             source_in_group = any(
                                 f"{(a.get('info') or a).get('surah_id', '')}:{(a.get('info') or a).get('number', '')}" == verse_key
                                 for a in ayahs_list
@@ -315,30 +310,25 @@ async def ask_question_stream(request: QuestionRequest):
     """
     async def generate_stream() -> AsyncGenerator[str, None]:
         try:
-            import re
-            from openai import AzureOpenAI
-            from src.ai.config import azure_config, rag_config, SYSTEM_PROMPTS
+            from google import genai
+            from src.ai.config import gemini_config, rag_config, SYSTEM_PROMPTS
             from src.ai.services.embedding_service import get_embedding_service
             from src.ai.services.qdrant_service import get_qdrant_service
 
             embedding_service = get_embedding_service()
             qdrant_service = get_qdrant_service()
 
-            # Check if this is a mutashabihat question
             is_mutashabihat, verse_key = _detect_mutashabihat_question(request.question)
 
-            # Retrieve relevant context
             context_parts = []
             sources = []
 
-            # If mutashabihat question with verse reference, get mutashabihat data first
             if is_mutashabihat and verse_key:
                 mutashabihat_context, mutashabihat_sources = _get_mutashabihat_data(verse_key)
                 if mutashabihat_context:
                     context_parts.append("بيانات المتشابهات:\n" + mutashabihat_context)
                     sources.extend(mutashabihat_sources)
 
-            # Generate embedding for the question
             query_vector = embedding_service.get_embedding(request.question)
 
             if request.include_verses:
@@ -375,15 +365,7 @@ async def ask_question_stream(request: QuestionRequest):
             # Send sources first
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
-            # Create streaming response
-            client = AzureOpenAI(
-                azure_endpoint=azure_config.endpoint,
-                api_key=azure_config.api_key,
-                api_version=azure_config.api_version,
-                timeout=60.0
-            )
-
-            # Use special prompt for mutashabihat questions
+            # Build prompt
             if is_mutashabihat and verse_key:
                 prompt = f"""أنت متخصص في علم المتشابهات في القرآن الكريم.
 
@@ -409,18 +391,22 @@ async def ask_question_stream(request: QuestionRequest):
                     question=request.question
                 )
 
-            stream = client.chat.completions.create(
-                model=azure_config.chat_deployment,
-                messages=[{"role": "system", "content": prompt}],
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens,
+            # Stream response from Gemini
+            client = genai.Client(api_key=gemini_config.api_key)
+            stream = client.interactions.create(
+                model=gemini_config.chat_model,
+                input=prompt,
+                generation_config={
+                    "temperature": gemini_config.chat_temperature,
+                    "max_output_tokens": gemini_config.chat_max_tokens,
+                },
                 stream=True
             )
 
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+            for event in stream:
+                if event.event_type == "step.delta":
+                    if event.delta.type == "text":
+                        yield f"data: {json.dumps({'type': 'content', 'content': event.delta.text})}\n\n"
 
             # Append beta disclaimer
             yield f"data: {json.dumps({'type': 'content', 'content': AI_DISCLAIMER})}\n\n"
@@ -657,10 +643,9 @@ async def hifz_assistant(request: HifzAssistantRequest):
     - Spaced repetition plans (التكرار المتباعد)
     """
     try:
-        from openai import AzureOpenAI
-        from src.ai.config import azure_config
+        from google import genai
+        from src.ai.config import gemini_config
 
-        # Get mutashabihat context if verse specified
         context_parts = []
         sources = []
 
@@ -671,17 +656,14 @@ async def hifz_assistant(request: HifzAssistantRequest):
                 context_parts.append(mutashabihat_context)
                 sources.extend(mutashabihat_sources)
 
-        # Build personalized context
         user_context = []
         if request.juz_memorized:
             user_context.append(f"عدد الأجزاء المحفوظة: {request.juz_memorized}")
         if request.daily_time_minutes:
             user_context.append(f"الوقت المتاح يومياً: {request.daily_time_minutes} دقيقة")
 
-        # Select appropriate prompt based on mode
         base_prompt = HIFZ_PROMPTS.get(request.mode, HIFZ_PROMPTS["general"])
 
-        # Build full prompt
         full_prompt = f"""{base_prompt}
 
 {"معلومات عن الطالب:" + chr(10) + chr(10).join(user_context) if user_context else ""}
@@ -692,22 +674,17 @@ async def hifz_assistant(request: HifzAssistantRequest):
 
 قدم إجابة مفصلة وعملية تساعد في الحفظ والمراجعة. استخدم التنسيق بالعناوين والنقاط للوضوح."""
 
-        # Call Azure OpenAI
-        client = AzureOpenAI(
-            azure_endpoint=azure_config.endpoint,
-            api_key=azure_config.api_key,
-            api_version=azure_config.api_version,
-            timeout=60.0
+        client = genai.Client(api_key=gemini_config.api_key)
+        interaction = client.interactions.create(
+            model=gemini_config.chat_model,
+            input=full_prompt,
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 2000,
+            }
         )
 
-        response = client.chat.completions.create(
-            model=azure_config.chat_deployment,
-            messages=[{"role": "system", "content": full_prompt}],
-            temperature=0.7,
-            max_tokens=2000
-        )
-
-        answer = response.choices[0].message.content + AI_DISCLAIMER
+        answer = interaction.output_text + AI_DISCLAIMER
 
         return AIResponse(
             success=True,
@@ -716,7 +693,7 @@ async def hifz_assistant(request: HifzAssistantRequest):
                 "mode": request.mode,
                 "sources": sources,
                 "tips": _get_quick_hifz_tips(request.mode),
-                "tokens_used": response.usage.total_tokens
+                "tokens_used": 0
             }
         )
 
@@ -734,10 +711,9 @@ async def hifz_assistant_stream(request: HifzAssistantRequest):
     """
     async def generate_stream() -> AsyncGenerator[str, None]:
         try:
-            from openai import AzureOpenAI
-            from src.ai.config import azure_config
+            from google import genai
+            from src.ai.config import gemini_config
 
-            # Get mutashabihat context if verse specified
             context_parts = []
             sources = []
 
@@ -748,14 +724,12 @@ async def hifz_assistant_stream(request: HifzAssistantRequest):
                     context_parts.append(mutashabihat_context)
                     sources.extend(mutashabihat_sources)
 
-            # Build personalized context
             user_context = []
             if request.juz_memorized:
                 user_context.append(f"عدد الأجزاء المحفوظة: {request.juz_memorized}")
             if request.daily_time_minutes:
                 user_context.append(f"الوقت المتاح يومياً: {request.daily_time_minutes} دقيقة")
 
-            # Select appropriate prompt
             base_prompt = HIFZ_PROMPTS.get(request.mode, HIFZ_PROMPTS["general"])
 
             full_prompt = f"""{base_prompt}
@@ -771,26 +745,22 @@ async def hifz_assistant_stream(request: HifzAssistantRequest):
             # Send sources first
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources, 'mode': request.mode})}\n\n"
 
-            # Stream response
-            client = AzureOpenAI(
-                azure_endpoint=azure_config.endpoint,
-                api_key=azure_config.api_key,
-                api_version=azure_config.api_version,
-                timeout=60.0
-            )
-
-            stream = client.chat.completions.create(
-                model=azure_config.chat_deployment,
-                messages=[{"role": "system", "content": full_prompt}],
-                temperature=0.7,
-                max_tokens=2000,
+            # Stream response from Gemini
+            client = genai.Client(api_key=gemini_config.api_key)
+            stream = client.interactions.create(
+                model=gemini_config.chat_model,
+                input=full_prompt,
+                generation_config={
+                    "temperature": 0.7,
+                    "max_output_tokens": 2000,
+                },
                 stream=True
             )
 
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+            for event in stream:
+                if event.event_type == "step.delta":
+                    if event.delta.type == "text":
+                        yield f"data: {json.dumps({'type': 'content', 'content': event.delta.text})}\n\n"
 
             # Append beta disclaimer
             yield f"data: {json.dumps({'type': 'content', 'content': AI_DISCLAIMER})}\n\n"
@@ -926,26 +896,26 @@ async def ai_health():
     """
     فحص حالة خدمات الذكاء الاصطناعي
 
-    Check health status of AI services (Qdrant, Azure OpenAI).
+    Check health status of AI services (Qdrant, Gemini).
     Fast check - only verifies config, minimal external calls.
     """
     import httpx
 
     health = {
         "qdrant": False,
-        "azure_openai": False,
+        "gemini": False,
         "qdrant_url": None
     }
 
-    # Check Azure OpenAI config (no API call - just verify credentials exist)
+    # Check Gemini config (no API call - just verify credentials exist)
     try:
-        from src.ai.config import azure_config
-        health["azure_openai"] = bool(azure_config.endpoint and azure_config.api_key)
-        health["azure_endpoint"] = azure_config.endpoint[:30] + "..." if azure_config.endpoint else None
+        from src.ai.config import gemini_config
+        health["gemini"] = bool(gemini_config.api_key)
+        health["gemini_model"] = gemini_config.chat_model
     except Exception as e:
-        health["azure_openai_error"] = str(e)
+        health["gemini_error"] = str(e)
 
-    # Check Qdrant connectivity via simple HTTP call (not using qdrant-client)
+    # Check Qdrant connectivity via simple HTTP call
     try:
         from src.ai.config import qdrant_config
         qdrant_url = qdrant_config.url
@@ -961,7 +931,7 @@ async def ai_health():
         health["qdrant_error"] = str(e)
 
     return {
-        "status": "healthy" if all([health["qdrant"], health["azure_openai"]]) else "degraded",
+        "status": "healthy" if all([health["qdrant"], health["gemini"]]) else "degraded",
         "services": health
     }
 
@@ -987,8 +957,8 @@ async def ai_stats():
         return {
             "total_vectors": total_vectors,
             "collections": collections,
-            "embedding_model": "text-embedding-3-large",
-            "chat_model": "gpt-4o",
+            "embedding_model": "gemini-embedding-001",
+            "chat_model": "gemini-2.5-flash",
             "vector_dimensions": 3072
         }
     except Exception as e:

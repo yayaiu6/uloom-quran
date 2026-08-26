@@ -1,15 +1,15 @@
 """
 RAG (Retrieval Augmented Generation) Service
-Combines Qdrant vector search with Azure OpenAI GPT-4o for intelligent Q&A
+Combines Qdrant vector search with Gemini for intelligent Q&A
 """
 
 import logging
 import re
 from typing import List, Dict, Any, Optional
-from openai import AzureOpenAI
+from google import genai
 from .embedding_service import get_embedding_service, EmbeddingService
 from .qdrant_service import get_qdrant_service, QdrantService
-from ..config import azure_config, rag_config, SYSTEM_PROMPTS
+from ..config import gemini_config, rag_config, SYSTEM_PROMPTS
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def get_mutashabihat_service():
 class RAGService:
     """
     RAG Service for Quranic Q&A and analysis.
-    Retrieves relevant context from Qdrant and generates responses using GPT-4o.
+    Retrieves relevant context from Qdrant and generates responses using Gemini.
     """
 
     def __init__(
@@ -43,13 +43,8 @@ class RAGService:
     ):
         self.embedding_service = embedding_service or get_embedding_service()
         self.qdrant_service = qdrant_service or get_qdrant_service()
-        self.client = AzureOpenAI(
-            azure_endpoint=azure_config.endpoint,
-            api_key=azure_config.api_key,
-            api_version=azure_config.api_version,
-            timeout=60.0  # 60 second timeout for chat
-        )
-        self.chat_deployment = azure_config.chat_deployment
+        self.client = genai.Client(api_key=gemini_config.api_key)
+        self.chat_model = gemini_config.chat_model
 
     def _is_mutashabihat_question(self, question: str) -> tuple:
         """
@@ -74,7 +69,6 @@ class RAGService:
             return is_mutashabihat, verse_key
 
         # Pattern 2: Arabic surah name with ayah number
-        # Map of Arabic surah names to numbers
         surah_names = {
             'الفاتحة': 1, 'البقرة': 2, 'آل عمران': 3, 'النساء': 4, 'المائدة': 5,
             'الأنعام': 6, 'الأعراف': 7, 'الأنفال': 8, 'التوبة': 9, 'يونس': 10,
@@ -101,15 +95,12 @@ class RAGService:
             'المسد': 111, 'الإخلاص': 112, 'الفلق': 113, 'الناس': 114
         }
 
-        # Try to find surah name and ayah number
         for surah_name, surah_num in surah_names.items():
             if surah_name in question:
-                # Look for ayah number near the surah name
-                # Patterns: "الآية 14", "آية 14", "الايه 14", "ايه 14", just number
                 ayah_patterns = [
-                    rf'(?:الآية|آية|الايه|ايه|اية|الاية)\s*(\d+)',  # الآية 14
-                    rf'(\d+)\s*(?:من\s*)?(?:سورة\s*)?{surah_name}',  # 14 سورة البقرة
-                    rf'{surah_name}\s*(?:الآية|آية|الايه|ايه|اية)?\s*(\d+)',  # البقرة آية 14 or البقرة 14
+                    rf'(?:الآية|آية|الايه|ايه|اية|الاية)\s*(\d+)',
+                    rf'(\d+)\s*(?:من\s*)?(?:سورة\s*)?{surah_name}',
+                    rf'{surah_name}\s*(?:الآية|آية|الايه|ايه|اية)?\s*(\d+)',
                 ]
 
                 for pattern in ayah_patterns:
@@ -155,7 +146,6 @@ class RAGService:
                         qp_data = qp_service.get_similar_verses_sync(surah, ayah)
 
                         if qp_data and isinstance(qp_data, list):
-                            # Extract similar verses from Quranpedia format
                             for item in qp_data:
                                 if not item.get("ayahs") or not isinstance(item["ayahs"], list):
                                     continue
@@ -172,22 +162,18 @@ class RAGService:
                                         source_in_group = True
                                         break
 
-                                # Skip groups that don't contain the source verse
                                 if not source_in_group:
                                     continue
 
-                                # Skip "انفرادات" (unique phrases, not similarities)
                                 if "انفرادات" in notes:
                                     continue
 
-                                # Extract other verses from this group
                                 for ayah_item in ayahs_list:
                                     info = ayah_item.get("info", ayah_item)
                                     sv_surah = info.get("surah_id", "")
                                     sv_ayah = info.get("number", "")
                                     sv_key = f"{sv_surah}:{sv_ayah}"
 
-                                    # Skip source verse
                                     if sv_key == verse_key:
                                         continue
 
@@ -199,7 +185,6 @@ class RAGService:
                                     })
 
                             if not context_parts:
-                                # Add source verse info from database
                                 context_parts.append(f"الآية الأصلية ({verse_key}):")
 
                 except Exception as e:
@@ -230,6 +215,18 @@ class RAGService:
             logger.error(f"Error getting mutashabihat context: {e}")
             return "", []
 
+    def _generate_response(self, prompt: str) -> str:
+        """Generate a response using Gemini."""
+        interaction = self.client.interactions.create(
+            model=self.chat_model,
+            input=prompt,
+            generation_config={
+                "temperature": gemini_config.chat_temperature,
+                "max_output_tokens": gemini_config.chat_max_tokens,
+            }
+        )
+        return interaction.output_text
+
     def answer_question(
         self,
         question: str,
@@ -241,20 +238,8 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Answer a question about the Quran using RAG.
-
-        Args:
-            question: User's question in Arabic or English
-            include_verses: Include verse search in context
-            include_tafsir: Include tafsir search in context
-            include_qiraat: Include qiraat differences in context
-            surah_filter: Optional filter by surah number
-            language: Response language (ar, en, both)
-
-        Returns:
-            Dict with answer, sources, and metadata
         """
         try:
-            # Check if this is a mutashabihat question
             is_mutashabihat, verse_key = self._is_mutashabihat_question(question)
 
             # Generate embedding for the question
@@ -264,7 +249,6 @@ class RAGService:
             context_parts = []
             sources = []
 
-            # If mutashabihat question with verse reference, get mutashabihat data first
             if is_mutashabihat and verse_key:
                 mutashabihat_context, mutashabihat_sources = self._get_mutashabihat_context(verse_key)
                 if mutashabihat_context:
@@ -316,14 +300,11 @@ class RAGService:
                         "score": q["score"]
                     } for q in qiraat])
 
-            # Combine context
             combined_context = "\n\n".join(context_parts) if context_parts else "لا يوجد سياق متاح"
 
-            # Truncate context if too long
             if len(combined_context) > rag_config.max_context_length:
                 combined_context = combined_context[:rag_config.max_context_length] + "..."
 
-            # Use special prompt for mutashabihat questions
             if is_mutashabihat and verse_key:
                 prompt = f"""أنت متخصص في علم المتشابهات في القرآن الكريم.
 
@@ -348,16 +329,7 @@ class RAGService:
                     question=question
                 )
 
-            response = self.client.chat.completions.create(
-                model=self.chat_deployment,
-                messages=[
-                    {"role": "system", "content": prompt}
-                ],
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens
-            )
-
-            answer = response.choices[0].message.content + AI_DISCLAIMER
+            answer = self._generate_response(prompt) + AI_DISCLAIMER
 
             return {
                 "answer": answer,
@@ -366,9 +338,9 @@ class RAGService:
                 "context_used": len(context_parts) > 0,
                 "is_mutashabihat_query": is_mutashabihat,
                 "tokens_used": {
-                    "prompt": response.usage.prompt_tokens,
-                    "completion": response.usage.completion_tokens,
-                    "total": response.usage.total_tokens
+                    "prompt": 0,
+                    "completion": 0,
+                    "total": 0
                 }
             }
 
@@ -384,38 +356,26 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Provide detailed explanation of a specific verse.
-
-        Args:
-            surah_id: Surah number
-            ayah_id: Ayah number
-            verse_text: Optional verse text (will be fetched if not provided)
-
-        Returns:
-            Dict with explanation and metadata
         """
         try:
             verse_key = f"{surah_id}:{ayah_id}"
 
-            # Search for tafsir context for this specific verse
             if verse_text:
                 query_vector = self.embedding_service.get_embedding(verse_text)
             else:
                 query_vector = self.embedding_service.get_embedding(f"تفسير الآية {verse_key}")
 
-            # Get tafsir for this verse
             tafsir = self.qdrant_service.search_tafsir(
                 query_vector=query_vector,
                 limit=5,
                 verse_key=verse_key
             )
 
-            # Get asbab al-nuzul
             asbab = self.qdrant_service.search_asbab(
                 query_vector=query_vector,
                 limit=2
             )
 
-            # Format context
             context_parts = []
             sources = []
 
@@ -438,7 +398,6 @@ class RAGService:
 
             combined_context = "\n\n".join(context_parts) if context_parts else ""
 
-            # Get surah name (placeholder - should come from database)
             prompt = SYSTEM_PROMPTS["verse_explanation"].format(
                 context=combined_context,
                 verse=verse_text or verse_key,
@@ -446,20 +405,13 @@ class RAGService:
                 ayah=ayah_id
             )
 
-            response = self.client.chat.completions.create(
-                model=self.chat_deployment,
-                messages=[
-                    {"role": "system", "content": prompt}
-                ],
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens
-            )
+            explanation = self._generate_response(prompt) + AI_DISCLAIMER
 
             return {
-                "explanation": response.choices[0].message.content + AI_DISCLAIMER,
+                "explanation": explanation,
                 "verse_key": verse_key,
                 "sources": sources,
-                "tokens_used": response.usage.total_tokens
+                "tokens_used": 0
             }
 
         except Exception as e:
@@ -474,14 +426,6 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Analyze qiraat differences for a specific verse.
-
-        Args:
-            surah_id: Surah number
-            ayah_id: Ayah number
-            verse_text: Optional verse text
-
-        Returns:
-            Dict with qiraat analysis
         """
         try:
             verse_key = f"{surah_id}:{ayah_id}"
@@ -502,20 +446,13 @@ class RAGService:
                 verse=verse_text or verse_key
             )
 
-            response = self.client.chat.completions.create(
-                model=self.chat_deployment,
-                messages=[
-                    {"role": "system", "content": prompt}
-                ],
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens
-            )
+            analysis = self._generate_response(prompt) + AI_DISCLAIMER
 
             return {
-                "analysis": response.choices[0].message.content + AI_DISCLAIMER,
+                "analysis": analysis,
                 "verse_key": verse_key,
                 "qiraat_found": len(qiraat) if qiraat else 0,
-                "tokens_used": response.usage.total_tokens
+                "tokens_used": 0
             }
 
         except Exception as e:
@@ -531,15 +468,6 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Compare different tafsir interpretations of a verse.
-
-        Args:
-            surah_id: Surah number
-            ayah_id: Ayah number
-            verse_text: Optional verse text
-            tafsir_ids: Optional list of specific tafsir IDs to compare
-
-        Returns:
-            Dict with tafsir comparison
         """
         try:
             verse_key = f"{surah_id}:{ayah_id}"
@@ -560,20 +488,13 @@ class RAGService:
                 verse=verse_text or verse_key
             )
 
-            response = self.client.chat.completions.create(
-                model=self.chat_deployment,
-                messages=[
-                    {"role": "system", "content": prompt}
-                ],
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens
-            )
+            comparison = self._generate_response(prompt) + AI_DISCLAIMER
 
             return {
-                "comparison": response.choices[0].message.content + AI_DISCLAIMER,
+                "comparison": comparison,
                 "verse_key": verse_key,
                 "tafsir_count": len(tafsir) if tafsir else 0,
-                "tokens_used": response.usage.total_tokens
+                "tokens_used": 0
             }
 
         except Exception as e:
@@ -589,15 +510,6 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Perform semantic search across Quranic content.
-
-        Args:
-            query: Search query in Arabic or English
-            search_type: Type of content to search (verses, tafsir, qiraat, all)
-            limit: Maximum results
-            surah_filter: Optional surah filter
-
-        Returns:
-            Dict with search results
         """
         try:
             query_vector = self.embedding_service.get_embedding(query)
@@ -641,19 +553,11 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Multi-turn chat with Quranic context.
-
-        Args:
-            messages: List of chat messages [{"role": "user/assistant", "content": "..."}]
-            include_context: Whether to retrieve context for the last message
-
-        Returns:
-            Dict with response and metadata
         """
         try:
             sources = []
 
             if include_context and messages:
-                # Get context for the last user message
                 last_user_msg = None
                 for msg in reversed(messages):
                     if msg["role"] == "user":
@@ -663,7 +567,6 @@ class RAGService:
                 if last_user_msg:
                     query_vector = self.embedding_service.get_embedding(last_user_msg)
 
-                    # Retrieve relevant context
                     verses = self.qdrant_service.search_verses(
                         query_vector=query_vector,
                         limit=3
@@ -693,17 +596,26 @@ class RAGService:
 - إذا لم تعرف الإجابة، اعترف بذلك"""
                         messages = [{"role": "system", "content": system_msg}] + messages
 
-            response = self.client.chat.completions.create(
-                model=self.chat_deployment,
-                messages=messages,
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens
-            )
+            # Build the prompt from messages for Gemini
+            prompt_parts = []
+            for msg in messages:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "system":
+                    prompt_parts.append(content)
+                elif role == "user":
+                    prompt_parts.append(f"المستخدم: {content}")
+                elif role == "assistant":
+                    prompt_parts.append(f"المساعد: {content}")
+
+            prompt = "\n\n".join(prompt_parts)
+
+            response_text = self._generate_response(prompt) + AI_DISCLAIMER
 
             return {
-                "response": response.choices[0].message.content + AI_DISCLAIMER,
+                "response": response_text,
                 "sources": sources,
-                "tokens_used": response.usage.total_tokens
+                "tokens_used": 0
             }
 
         except Exception as e:
@@ -719,20 +631,10 @@ class RAGService:
     ) -> Dict[str, Any]:
         """
         Analyze similar verses (mutashabihat) using AI.
-
-        Args:
-            surah_id: Surah number
-            ayah_id: Ayah number
-            verse_text: Optional verse text
-            similar_verses: Optional list of similar verses from Quranpedia
-
-        Returns:
-            Dict with mutashabihat analysis
         """
         try:
             verse_key = f"{surah_id}:{ayah_id}"
 
-            # Build context from similar verses
             context_parts = []
 
             if verse_text:
@@ -747,7 +649,6 @@ class RAGService:
 
             combined_context = "\n".join(context_parts) if context_parts else "لا توجد بيانات"
 
-            # Create analysis prompt
             prompt = f"""أنت متخصص في علم المتشابهات في القرآن الكريم.
 
 مهمتك تحليل الآيات المتشابهة التالية وتوضيح:
@@ -761,20 +662,13 @@ class RAGService:
 
 قدم تحليلاً علمياً مفصلاً ومفيداً للقارئ والحافظ."""
 
-            response = self.client.chat.completions.create(
-                model=self.chat_deployment,
-                messages=[
-                    {"role": "system", "content": prompt}
-                ],
-                temperature=azure_config.chat_temperature,
-                max_tokens=azure_config.chat_max_tokens
-            )
+            analysis = self._generate_response(prompt) + AI_DISCLAIMER
 
             return {
-                "analysis": response.choices[0].message.content + AI_DISCLAIMER,
+                "analysis": analysis,
                 "verse_key": verse_key,
                 "similar_count": len(similar_verses) if similar_verses else 0,
-                "tokens_used": response.usage.total_tokens
+                "tokens_used": 0
             }
 
         except Exception as e:

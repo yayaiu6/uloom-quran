@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "db", "uloom_quran.db")
-VECTOR_SIZE = 1536  # text-embedding-ada-002 dimensions
+VECTOR_SIZE = 3072  # gemini-embedding-001 dimensions
 
 # Collection names
 COLLECTIONS = {

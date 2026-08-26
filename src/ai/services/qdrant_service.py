@@ -17,7 +17,7 @@ from qdrant_client.http.models import (
     Range,
     SearchRequest
 )
-from ..config import qdrant_config, azure_config
+from ..config import qdrant_config, gemini_config
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class QdrantService:
                 check_compatibility=False
             )
 
-        self.vector_size = azure_config.embedding_dimensions
+        self.vector_size = gemini_config.embedding_dimensions
 
     def initialize_collections(self):
         """
