@@ -24,7 +24,6 @@ build/
 .vscode/
 *.swp
 *.swo
-Dockerfile
 docker-compose*.yml
 k8s/
 .claude/
