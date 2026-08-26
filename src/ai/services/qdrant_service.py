@@ -15,7 +15,6 @@ from qdrant_client.http.models import (
     FieldCondition,
     MatchValue,
     Range,
-    SearchRequest
 )
 from ..config import qdrant_config, gemini_config
 
